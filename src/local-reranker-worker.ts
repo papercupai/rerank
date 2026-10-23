@@ -337,7 +337,9 @@ export async function shutdownLocalReranker(opts: { drainMs?: number } = {}): Pr
   }
   state.pending.clear();
   state.nextId = 0;
-  if (old) {
+  // An exited worker needs neither retirement nor termination. Bun 1.3.14
+  // leaves terminate() pending after exit; callers were already rejected above.
+  if (old && old.threadId !== -1) {
     // A worker that owed answers may be mid-run; terminating it then aborts the
     // process. `opts?.`: a `.then(shutdownLocalReranker)` can pass null.
     if (owed > 0) void retireWorker(old, opts?.drainMs ?? RERANK_WORKER_RETIRE_DRAIN_MS);
@@ -364,7 +366,8 @@ function retireWorker(w: Worker, drainMs: number): Promise<void> {
       console.warn(`[rerank-worker] retiring worker did not report retired within ${drainMs}ms; terminating it anyway `
         + '(WI-10006567: terminating during a native run can abort the process)');
     }
-    if (how !== 'exited') {
+    // The worker may exit before this retired/error continuation runs.
+    if (how !== 'exited' && w.threadId !== -1) {
       try { await w.terminate(); } catch { /* already gone */ }
     }
     retiring.delete(w);
